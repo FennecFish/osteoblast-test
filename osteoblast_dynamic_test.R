@@ -2,6 +2,7 @@ library(devtools)
 if (packageVersion("fishpond") < "2.1.36") {
     install_github("mikelove/fishpond")
 }
+
 library(dplyr)
 suppressPackageStartupMessages(library(SummarizedExperiment))
 library(tximeta)
@@ -10,6 +11,7 @@ library(AnnotationHub)
 library(ensembldb)
 library(Gviz)
 library(UpSetR)
+library(pheatmap)
 
 set.seed(1)
 
@@ -17,38 +19,37 @@ set.seed(1)
 #################################### Upset Plot ######################################
 #######################################################################################
 
-load("CASTxB6.gene.global.rda")
+load("CASTxB6.gene.dynamic.rda")
 
-gene_dat <- as.data.frame(mcols(global))
+gene_dat <- as.data.frame(mcols(dy))
 # select genes with significant AI at 5% FDR
 sig_gene <- gene_dat %>% 
     dplyr::filter(qvalue < 0.05) %>% 
     dplyr::select(ends_with("id"), "symbol", "log2FC", "qvalue")
-length(unique(sig_gene$group_id)) # 5701
+length(unique(sig_gene$group_id)) # 57
 
-load("CASTxB6.fuzzy.tss.global.rda")
+load("CASTxB6.fuzzy.tss.dynamic.rda")
 # select tss groups with significant AI at 5% FDR
-tss_dat <- as.data.frame(mcols(global))
+tss_dat <- as.data.frame(mcols(dy))
 sig_tss <- tss_dat %>% 
     dplyr::filter(qvalue < 0.05) %>%
     dplyr::select(ends_with("id"), "symbol", "log2FC", "qvalue")
-length(unique(sig_tss$gene_id)) # 5573
+length(unique(sig_tss$gene_id)) # 49
 
-load("CASTxB6.txp.global.rda")
+load("CASTxB6.txp.dynamic.rda")
 # select txps groups with significant AI at 5% FDR
-txp_dat <- as.data.frame(mcols(global))
+txp_dat <- as.data.frame(mcols(dy))
 sig_txp <- txp_dat %>% 
     dplyr::filter(qvalue < 0.05) %>%
     dplyr::select(ends_with("id"), "symbol", "log2FC", "qvalue")
-length(unique(sig_txp$gene_id)) # 6116
+length(unique(sig_txp$gene_id)) # 23
 
-length(unique(intersect(sig_gene$group_id,sig_tss$gene_id))) # 4873
-length(unique(intersect(sig_gene$group_id,sig_txp$gene_id))) # 4880
-length(unique(intersect(sig_txp$gene_id,sig_tss$gene_id))) # 5284
-length(unique(intersect(sig_gene$group_id,intersect(sig_txp$gene_id,sig_tss$gene_id)))) # 4625
+length(unique(intersect(sig_gene$group_id,intersect(sig_txp$gene_id,sig_tss$gene_id)))) # 19
+length(unique(intersect(sig_gene$group_id,sig_tss$gene_id))) #38
 
-# making upset plot
+
 data <- list(Gene =unique(sig_gene$group_id), TSS =unique(sig_tss$gene_id), Txp =unique(sig_txp$gene_id))
+# pdf("Dynamic_upsetPlot.pdf", height = 10, width = 15)
 upset(fromList(data),
       order.by = "freq", 
       decreasing = T, 
@@ -59,142 +60,160 @@ upset(fromList(data),
       line.size = 2,
       mainbar.y.label = "Significant Genes Distinct Intersections", 
       sets.x.label = "Significant Genes Set Size")
+# dev.off()
 
 #######################################################################################
-###################### A complete List of different direction AI ######################
+###################################### Calcoco1 #######################################
 #######################################################################################
 
-load("CASTxB6.gene.global.rda")
+load("CASTxB6.fuzzy.tss.dynamic.rda")
+tss_dat <- mcols(dy) %>% as_tibble
 
-gene_dat <- as.data.frame(mcols(global))
-sig_gene <- gene_dat %>% 
-    dplyr::filter(qvalue < 0.05) %>% 
-    dplyr::select(ends_with("id"), "symbol", "log2FC", "qvalue")
+load("CASTxB6.txp.dynamic.rda")
+txp_dat <- mcols(dy) %>% as_tibble
 
-load("CASTxB6.fuzzy.tss.global.rda")
-tss_dat <- as.data.frame(mcols(global))
-sig_tss <- tss_dat %>% 
-    dplyr::filter(qvalue < 0.05) %>%
-    dplyr::select(ends_with("id"), "symbol", "log2FC", "qvalue")
+# list of genes with dynamic AI and discordant TSS
+list <- tss_dat %>% 
+    dplyr::filter(pvalue < .01) %>%
+    dplyr::group_by(gene_id) %>% 
+    dplyr::summarize(count=n(), min=min(log2FC), max=max(log2FC), minQ=min(qvalue)) %>% 
+    dplyr::filter(count > 1, sign(min) != sign(max)) %>% 
+    as.data.frame()
 
-dat <- inner_join(sig_gene, sig_tss, by = c("group_id" = "gene_id"))
-# flag tss groups with opposite direction of AI under the same genes
-dat <- dat %>% group_by(group_id) %>% mutate(direction = mean(sign(log2FC.x) == sign(log2FC.y)) != 1)
-diff_iso <- dat %>% dplyr::filter(direction == "TRUE") %>% dplyr::select(-c("symbol.y","tx_id.x","direction")) %>%
-    dplyr::rename(gene_id = group_id,
-                  symbol = symbol.x,
-                  log2FC_gene = log2FC.x,
-                  qvalue_gene = qvalue.x,
-                  tss_group_id = group_id.y,
-                  log2FC_tss = log2FC.y,
-                  qvalue_tss = qvalue.y)
-diff_iso$num_txp <- lengths(diff_iso$tx_id.y)
-diff_iso <- diff_iso %>% dplyr::select(-c("tx_id.y"))
+# Calcoco1 is the 6th of the list
+tss_dat %>% dplyr::filter(gene_id == list$gene_id[6]) %>% 
+    dplyr::select(gene_id, group_id, symbol, log10mean, stat, log2FC, pvalue, qvalue, meanInfRV)
+txp_dat %>% dplyr::filter(gene_id == list$gene_id[6]) %>% 
+    dplyr::select(tx_id, gene_id, symbol, log10mean, stat, log2FC, pvalue, qvalue, meanInfRV, fuzzy_tss_group)
 
-diff_gene <- diff_iso %>% group_by(tss_group_id) %>% mutate(direction = mean(sign(log2FC_gene) == sign(log2FC_tss)) != 1)
-diff_gene <- diff_gene %>% dplyr::filter(direction == "TRUE") %>% dplyr::select(-c("direction"))
-length(unique(diff_gene$gene_id)) #134
-diff_gene <- diff_gene %>% dplyr::select(tss_group_id, symbol, log2FC_gene, qvalue_gene, log2FC_tss, qvalue_tss)
+load("CASTxB6.fuzzy.tss.dynamic.rda")
+levels(dy$allele) <- c("B6","CAST")
+# making the plotInfReps plot
+# pdf("Dynamic_infRV_Calcoco1.pdf", width = 15, height = 15)
+par(mfrow=c(2,2), cex=0.3)
+exp <- tss_dat %>% dplyr::filter(gene_id == list$gene_id[6]) 
 
-write.csv(as.data.frame(diff_gene), file = paste0("Genes_w_Isoforms_Diff_Direction.csv"), row.names = T)
+plotInfReps(dy, idx = exp$group_id[1], x= "day", cov = "allele", shiftX = 0.01)
+lines(dy$day[1:9], assay(dy, "mean")[exp$group_id[1],1:9], col="dodgerblue") 
+lines(dy$day[10:18], assay(dy, "mean")[exp$group_id[1],10:18], col="goldenrod4")
+legend("bottomright", legend=c("B6", "CAST"), pch = 10, col = c("dodgerblue", "goldenrod4"))
+
+plotInfReps(dy, idx = exp$group_id[2], x= "day", cov = "allele", shiftX = 0.01)
+lines(dy$day[1:9], assay(dy, "mean")[exp$group_id[2],1:9], col="dodgerblue") 
+lines(dy$day[10:18], assay(dy, "mean")[exp$group_id[2],10:18], col="goldenrod4")
+
+png("Dynamic_infRV_Calcoco1_sub.png", res = 300, width = 3000, height = 1500)
+par(mfrow=c(1,2), cex=1)
+plotInfReps(dy, idx = exp$group_id[3], x= "day", cov = "allele", shiftX = 0.01)
+lines(dy$day[1:9], assay(dy, "mean")[exp$group_id[3],1:9], col="dodgerblue") 
+lines(dy$day[10:18], assay(dy, "mean")[exp$group_id[3],10:18], col="goldenrod4")
+
+plotInfReps(dy, idx = exp$group_id[4], x= "day", cov = "allele", shiftX = 0.01)
+lines(dy$day[1:9], assay(dy, "mean")[exp$group_id[4],1:9], col="dodgerblue") 
+lines(dy$day[10:18], assay(dy, "mean")[exp$group_id[4],10:18], col="goldenrod4")
+legend("bottomright", legend=c("B6", "CAST"), pch = 10, col = c("dodgerblue", "goldenrod4"))
+dev.off()
+
+ah <- AnnotationHub()
+edb <- ah[["AH89211"]]
+
+# make plotAllelicGene plot
+par(mfrow=c(1,1), cex=0.3)
+dy$time_bins <- cut(dy$day,breaks=c(2,6,12,18),include.lowest=TRUE, labels=FALSE)
+time_labels <- c("Day02-06","Day08-12","Day14-18")
+dy$time_bins <- time_labels[ dy$time_bins ]
+plotAllelicGene(dy, list$gene_id[6], edb, cov="time_bins",
+                qvalue=FALSE, log2FC=FALSE,  tpmFilter = 0.1, labels=list(a2="B6",a1="CAST"))
+
+par(mfrow=c(1,1), cex=1)
+idx <- mcols(dy)$gene_id == list$gene_id[6]
+colnames(dy) <- c(paste0("Day ",seq(2,18, by= 2), "-a2"), 
+                  paste0("Day ",seq(2,18, by= 2), "-a1"))
+row_dat <- data.frame(minusLogQ=-log10(mcols(dy)$qvalue[idx]),
+                      row.names=rownames(dy)[idx])
+col_dat <- data.frame(time=dy$day[1:9],
+                      row.names=paste0("Day ",seq(2,18, by= 2)))
+plotAllelicHeatmap(dy, idx=idx,
+                   annotation_row=row_dat,
+                   annotation_col=col_dat,
+                   cluster_rows=FALSE, 
+                   labels_row=c("TSS-1","TSS-3","TSS-5","TSS-6"), main = "")
+
+#######################################################################################
+#################################### Fig 3 Rasl11b ####################################
+#######################################################################################
+
+ah <- AnnotationHub()
+edb <- ah[["AH89211"]]
+
+load("CASTxB6.fuzzy.tss.dynamic.rda")
+levels(dy$allele) <- c("B6","CAST")
+rowMeans(assay(dy, "abundance")[mcols(dy)$gene_id == list$gene_id[15],])
+
+# making infRep plot
+par(mfrow=c(2,1), cex=0.5)
+plotInfReps(dy, idx = "ENSMUSG00000049907-1", x= "day", cov = "allele", shiftX = 0.01)
+lines(dy$day[1:9], assay(dy, "mean")["ENSMUSG00000049907-1",1:9], col="dodgerblue") 
+lines(dy$day[10:18], assay(dy, "mean")["ENSMUSG00000049907-1",10:18], col="goldenrod4")
+plotInfReps(dy, idx = "ENSMUSG00000049907-3", x= "day", cov = "allele", shiftX = 0.01)
+lines(dy$day[1:9], assay(dy, "mean")["ENSMUSG00000049907-3",1:9], col="dodgerblue") 
+lines(dy$day[10:18], assay(dy, "mean")["ENSMUSG00000049907-3",10:18], col="goldenrod4")
+legend("topright", legend=c("B6", "CAST"), pch = 15, col = c("dodgerblue", "goldenrod4"))
+
+# making allelicGene plot 
+par(mfrow=c(1,1), cex=2)
+dy$time_bins <- cut(dy$day,breaks=c(2,6,12,18),include.lowest=TRUE, labels=FALSE)
+time_labels <- c("Day02-06","Day08-12","Day14-18")
+dy$time_bins <- time_labels[ dy$time_bins ]
+plotAllelicGene(dy, "ENSMUSG00000049907", edb, cov="time_bins",
+                qvalue=FALSE, log2FC=FALSE,  tpmFilter = 0.1, labels=list(a2="B6",a1="CAST"))
+
+# making heatmap plot 
+par(mfrow=c(1,1), cex=0.3)
+idx <- mcols(dy)$gene_id == list$gene_id[15]
+colnames(dy) <- c(paste0("Day ",seq(2,18, by= 2), "-a2"), 
+                  paste0("Day ",seq(2,18, by= 2), "-a1"))
+row_dat <- data.frame(minusLogQ=-log10(mcols(dy)$qvalue[idx]),
+                      row.names=rownames(dy)[idx])
+col_dat <- data.frame(time=dy$day[1:9],
+                      row.names=paste0("Day ",seq(2,18, by= 2)))
+plotAllelicHeatmap(dy, idx=idx,
+                   annotation_row=row_dat,
+                   annotation_col=col_dat,
+                   cluster_rows=FALSE, 
+                   labels_row=c("TSS-1","TSS-3"), main = "")
+
 
 #######################################################################################
 ###################### Output sig output on all three resolution ######################
 #######################################################################################
 
-load("CASTxB6.gene.global.rda")
+load("CASTxB6.gene.dynamic.rda")
 
-gene_dat <- as.data.frame(mcols(global))
+gene_dat <- as.data.frame(mcols(dy))
 sig_gene <- gene_dat %>% 
     dplyr::filter(qvalue < 0.05) %>% 
     dplyr::select("symbol", "log10mean", "stat", "log2FC"
                   , "pvalue", "locfdr", "qvalue", "meanInfRV") %>%
     dplyr::arrange(pvalue)
-write.csv(sig_gene, file = "global_sig_gene.csv", row.names = T)
+write.csv(sig_gene, file = "dynamic_sig_gene.csv", row.names = T)
 
-load("CASTxB6.fuzzy.tss.global.rda")
-tss_dat <- as.data.frame(mcols(global))
+load("CASTxB6.fuzzy.tss.dynamic.rda")
+tss_dat <- as.data.frame(mcols(dy))
 sig_tss <- tss_dat %>% 
     dplyr::filter(qvalue < 0.05) %>%
     dplyr::select("gene_id", "symbol", "start_position", "log10mean", 
                   "stat", "log2FC", "pvalue", "locfdr", "qvalue", "meanInfRV") %>%
     dplyr::arrange(pvalue)
-write.csv(sig_tss, file = "global_sig_fuzzy_tss.csv", row.names = T)
+write.csv(sig_tss, file = "dymamic_sig_fuzzy_tss.csv", row.names = T)
 
-load("CASTxB6.txp.global.rda")
-txp_dat <- as.data.frame(mcols(global))
+load("CASTxB6.txp.dynamic.rda")
+txp_dat <- as.data.frame(mcols(dy))
 sig_txp <- txp_dat %>% 
     dplyr::filter(qvalue < 0.05) %>%
     dplyr::select("tx_id", "gene_id", "symbol", "log10mean", 
                   "stat", "log2FC", "pvalue", "locfdr", "qvalue", "meanInfRV", 
                   "fuzzy_tss_group") %>%
     dplyr::arrange(pvalue)
-write.csv(sig_txp, file = "global_sig_txp.csv", row.names = T)
+write.csv(sig_txp, file = "dynamic_sig_txp.csv", row.names = T)
 
-#######################################################################################
-######################### global significant with TSS percentage ######################
-#######################################################################################
-
-load("CASTxB6.gene.global.rda")
-gene_dat <- as.data.frame(mcols(global))
-sig_gene <- gene_dat %>% 
-    dplyr::filter(qvalue < 0.05) %>% 
-    dplyr::select(ends_with("id"), "symbol", "log2FC", "qvalue")
-
-load("CASTxB6.fuzzy.tss.global.rda")
-tss_dat <- as.data.frame(mcols(global))
-sig_tss <- tss_dat %>% 
-    dplyr::filter(qvalue < 0.05) %>%
-    dplyr::select(ends_with("id"), "symbol", "log2FC", "qvalue")
-
-dat <- inner_join(sig_gene, sig_tss, by = c("group_id" = "gene_id"))
-perc <- dat %>% group_by(group_id.y)  %>% 
-    summarise(count = mean(sign(log2FC.x) == sign(log2FC.y)))
-dat1 <- left_join(perc, sig_tss, by = c("group_id.y" = "group_id")) %>% arrange(gene_id,count)
-# select the first row of each gene since count 0 will be the first if they exists
-dat1 <- dat1[!duplicated(dat1$gene_id ),]
-perc <- dat1 %>% group_by(count) %>% summarise(n = n ())
-
-#######################################################################################
-###################################### Fig.3 Fuca2######################################
-#######################################################################################
-
-gene_dat %>% dplyr::filter(symbol == "Fuca2")
-tss_dat %>% dplyr::filter(symbol == "Fuca2")
-
-load("CASTxB6.txp.global.rda")
-txp_dat <- as.data.frame(mcols(global))
-txp_dat %>% dplyr::filter(symbol == "Fuca2")
-
-ah <- AnnotationHub()
-edb <- ah[["AH89211"]]
-
-load("CASTxB6.fuzzy.tss.global.rda")
-levels(global$allele) <- c("B6","CAST")
-plotAllelicGene(global, symbol="Fuca2", db=edb, labels=list(a2="B6",a1="CAST")) # good example
-
-rowMeans(assay(global, "abundance")[which(mcols(global)$symbol == "Fuca2"),])
-
-#######################################################################################
-################################## Fig. 4 Sparc #######################################
-#######################################################################################
-
-load("CASTxB6.fuzzy.tss.global.rda")
-tss <- global
-levels(tss$allele) <- c("B6","CAST") # B6 is reference = a2, CAST is alternative = a1
-mcols(tss) %>% as.data.frame() %>% dplyr::filter(gene_id == "ENSMUSG00000018593")
-
-png(file="sparc_plotinfreps.png", width=5000, height=3000, res = 300, pointsize = 30)
-par(mfrow=c(1,2))
-idx = "ENSMUSG00000018593-4"
-plotInfReps(tss, idx =  idx, x= "day", cov = "allele", 
-            shiftX = 0.01, legend = T, legendPos = "bottomright")
-lines(tss$day[1:9], assay(tss, "mean")[idx,1:9], col="dodgerblue") 
-lines(tss$day[10:18], assay(tss, "mean")[idx,10:18], col="goldenrod4")
-
-idx = "ENSMUSG00000018593-5"
-plotInfReps(tss, idx =  idx, x= "day", cov = "allele", 
-            shiftX = 0.01, legend = F)
-lines(tss$day[1:9], assay(tss, "mean")[idx,1:9], col="dodgerblue") 
-lines(tss$day[10:18], assay(tss, "mean")[idx,10:18], col="goldenrod4")
-dev.off()
