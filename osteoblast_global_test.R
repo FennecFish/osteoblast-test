@@ -156,7 +156,7 @@ dat1 <- dat1[!duplicated(dat1$gene_id ),]
 perc <- dat1 %>% group_by(count) %>% summarise(n = n ())
 
 #######################################################################################
-###################################### Fuca2 Plot######################################
+###################################### Fig.3 Fuca2######################################
 #######################################################################################
 
 gene_dat %>% dplyr::filter(symbol == "Fuca2")
@@ -170,6 +170,31 @@ ah <- AnnotationHub()
 edb <- ah[["AH89211"]]
 
 load("CASTxB6.fuzzy.tss.global.rda")
+levels(global$allele) <- c("B6","CAST")
 plotAllelicGene(global, symbol="Fuca2", db=edb, labels=list(a2="B6",a1="CAST")) # good example
 
 rowMeans(assay(global, "abundance")[which(mcols(global)$symbol == "Fuca2"),])
+
+#######################################################################################
+################################## Fig. 4 Sparc #######################################
+#######################################################################################
+
+load("CASTxB6.fuzzy.tss.global.rda")
+tss <- global
+levels(tss$allele) <- c("B6","CAST") # B6 is reference = a2, CAST is alternative = a1
+mcols(tss) %>% as.data.frame() %>% dplyr::filter(gene_id == "ENSMUSG00000018593")
+
+png(file="sparc_plotinfreps.png", width=5000, height=3000, res = 300, pointsize = 30)
+par(mfrow=c(1,2))
+idx = "ENSMUSG00000018593-4"
+plotInfReps(tss, idx =  idx, x= "day", cov = "allele", 
+            shiftX = 0.01, legend = T, legendPos = "bottomright")
+lines(tss$day[1:9], assay(tss, "mean")[idx,1:9], col="dodgerblue") 
+lines(tss$day[10:18], assay(tss, "mean")[idx,10:18], col="goldenrod4")
+
+idx = "ENSMUSG00000018593-5"
+plotInfReps(tss, idx =  idx, x= "day", cov = "allele", 
+            shiftX = 0.01, legend = F)
+lines(tss$day[1:9], assay(tss, "mean")[idx,1:9], col="dodgerblue") 
+lines(tss$day[10:18], assay(tss, "mean")[idx,10:18], col="goldenrod4")
+dev.off()
